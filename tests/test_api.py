@@ -327,3 +327,14 @@ async def test_click_tracking_never_calls_maxmind(monkeypatch):
     async with async_session() as s:
         visit = (await s.scalars(select(Visit).order_by(Visit.id.desc()))).first()
     assert visit.ip_address == "2.88.1.1" and visit.country_code == "SA" and visit.utm_source == "snapchat"
+
+
+async def test_admin_locked_with_default_jwt_secret(monkeypatch):
+    """The default secret is public on GitHub: a token forged with it must never work."""
+    import jwt as pyjwt
+
+    monkeypatch.setattr(maxmind.settings, "admin_jwt_secret", "change-me-in-production")
+    forged = pyjwt.encode({"sub": "attacker", "exp": 9999999999}, "change-me-in-production", algorithm="HS256")
+    async with client() as c:
+        r = await c.get("/api/admin/metrics", headers={"Authorization": f"Bearer {forged}"})
+    assert r.status_code == 503
