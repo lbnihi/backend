@@ -112,7 +112,7 @@ async def test_full_flow_with_upsell(stubs):
             "product_name": "كبسولات حمض الهيالورونيك",
             "original_price": 199.0,
             "offer_price": 99.0,
-            "tagline": "نضارتك من الداخل... بشرة مشرقة بدون فلتر",
+            "tagline": "ركب أخف وبشرة تشع... بكبسولتين في اليوم",
         }
         await settle()
 
