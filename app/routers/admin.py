@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -107,7 +107,7 @@ async def get_metrics(
     # Daily chart data
     daily_clicks = await db.execute(
         select(
-            cast(Visit.created_at, Date).label("day"),
+            func.date(Visit.created_at).label("day"),
             func.count(Visit.id),
             func.count(func.distinct(Visit.ip_address)),
         )
@@ -123,7 +123,7 @@ async def get_metrics(
 
     daily_orders = await db.execute(
         select(
-            cast(Order.created_at, Date).label("day"),
+            func.date(Order.created_at).label("day"),
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0),
         )
@@ -148,15 +148,17 @@ async def get_metrics(
             "conversion": round(o["orders"] / c["unique"] * 100, 1) if c["unique"] > 0 else 0,
         })
 
-    # Top sources
+    # Top sources. The default is a SQL literal, not a bound parameter: Postgres treats two
+    # parameters as different expressions and rejects the GROUP BY.
+    source = func.coalesce(Order.utm_source, literal_column("'direct'")).label("source")
     source_rows = await db.execute(
         select(
-            func.coalesce(Order.utm_source, "direct"),
+            source,
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0),
         )
         .where(Order.created_at.between(start_dt, end_dt))
-        .group_by(func.coalesce(Order.utm_source, "direct"))
+        .group_by(source)
         .order_by(func.count(Order.id).desc())
         .limit(10)
     )
@@ -179,13 +181,14 @@ async def get_metrics(
     top_products = sorted(product_sales.values(), key=lambda x: x["revenue"], reverse=True)
 
     # Top cities
+    city = func.coalesce(Order.city, literal_column("'Unknown'")).label("city")
     city_rows = await db.execute(
         select(
-            func.coalesce(Order.city, "Unknown"),
+            city,
             func.count(Order.id),
         )
         .where(Order.created_at.between(start_dt, end_dt))
-        .group_by(func.coalesce(Order.city, "Unknown"))
+        .group_by(city)
         .order_by(func.count(Order.id).desc())
         .limit(10)
     )

@@ -338,3 +338,18 @@ async def test_admin_locked_with_default_jwt_secret(monkeypatch):
     async with client() as c:
         r = await c.get("/api/admin/metrics", headers={"Authorization": f"Bearer {forged}"})
     assert r.status_code == 503
+
+
+async def test_admin_metrics_endpoint(monkeypatch):
+    """Dashboard metrics load (sources / cities grouping) with a valid admin token."""
+    from app.services.auth import create_token
+
+    monkeypatch.setattr(maxmind.settings, "admin_jwt_secret", "x" * 40)
+    token = create_token("admin")
+    async with client() as c:
+        await c.post("/api/orders", json=order_body(phone="0554445555"), headers={"X-Forwarded-For": SA_IP})
+        r = await c.get("/api/admin/metrics", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert any(s["source"] == "snapchat" for s in body["top_sources"])
+    assert any(c["city"] == "Riyadh" for c in body["top_cities"])
