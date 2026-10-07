@@ -191,7 +191,7 @@ async def test_upsell_skips_products_already_in_cart():
     async with client() as c:
         r = await c.post("/api/orders", json=order_body(items=items, phone="0558888888"), headers={"X-Forwarded-For": SA_IP})
     assert r.status_code == 201
-    assert r.json()["upsell"]["product_slug"] == "thyme-blackseed"
+    assert r.json()["upsell"]["product_slug"] == "moringa"
     assert r.json()["order"]["total"] == 398.0
 
 
@@ -353,3 +353,17 @@ async def test_admin_metrics_endpoint(monkeypatch):
     body = r.json()
     assert any(s["source"] == "snapchat" for s in body["top_sources"])
     assert any(c["city"] == "Riyadh" for c in body["top_cities"])
+
+
+async def test_moringa_orders_and_oregano_never_upsold():
+    from app.catalog import CROSS_SELL, UPSELL_TARGET, pick_upsell
+
+    assert all(t != "thyme-blackseed" for t in UPSELL_TARGET.values())
+    assert all("thyme-blackseed" not in v for v in CROSS_SELL.values())
+    for cart in (["moringa"], ["turmeric-golden", "hyaluronic-acid"], ["thyme-blackseed"]):
+        assert pick_upsell(cart) != "thyme-blackseed"
+    items = [{"product_slug": "moringa", "product_name": "x", "quantity": 1, "unit_price": 1, "total_price": 1, "offer_label": "x"}]
+    async with client() as c:
+        r = await c.post("/api/orders", json=order_body(items=items, phone="0556667777"), headers={"X-Forwarded-For": SA_IP})
+    assert r.status_code == 201, r.text
+    assert r.json()["order"]["total"] == 199.0 and r.json()["order"]["items"][0]["product_name"] == "كبسولات المورينجا"

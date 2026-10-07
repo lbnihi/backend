@@ -27,6 +27,11 @@ PRODUCTS: dict[str, CatalogProduct] = {
         name="كبسولات حمض الهيالورونيك",
         tagline="ركب أخف وبشرة تشع... بكبسولتين في اليوم",
     ),
+    "moringa": CatalogProduct(
+        slug="moringa",
+        name="كبسولات المورينجا",
+        tagline="طاقة تكفي يومك... بكبسولة وحدة",
+    ),
 }
 
 # quantity -> (price, label)
@@ -39,17 +44,20 @@ OFFERS: dict[int, tuple[Decimal, str]] = {
 SINGLE_PRICE = OFFERS[1][0]
 UPSELL_PRICE = Decimal("99.00")
 
-# Post-checkout upsell target per product (docs/03-product-catalog.md)
+# Post-checkout upsell target per product. Upsells and cross-sells only offer the capsule line
+# (turmeric, hyaluronic, moringa); oregano is still sold on its own page.
 UPSELL_TARGET: dict[str, str] = {
     "turmeric-golden": "hyaluronic-acid",
+    "hyaluronic-acid": "turmeric-golden",
+    "moringa": "turmeric-golden",
     "thyme-blackseed": "turmeric-golden",
-    "hyaluronic-acid": "thyme-blackseed",
 }
 
 CROSS_SELL: dict[str, list[str]] = {
-    "turmeric-golden": ["hyaluronic-acid", "thyme-blackseed"],
+    "turmeric-golden": ["hyaluronic-acid", "moringa"],
+    "hyaluronic-acid": ["turmeric-golden", "moringa"],
+    "moringa": ["turmeric-golden", "hyaluronic-acid"],
     "thyme-blackseed": ["turmeric-golden", "hyaluronic-acid"],
-    "hyaluronic-acid": ["thyme-blackseed", "turmeric-golden"],
 }
 
 
