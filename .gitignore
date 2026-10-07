@@ -1,0 +1,30 @@
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+
+# Build
+dist/
+build/
+
+# MaxMind
+*.mmdb
+data/
+
+# Tests
+.pytest_cache/
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
