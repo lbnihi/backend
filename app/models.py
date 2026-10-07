@@ -69,3 +69,20 @@ class OrderEvent(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     response_status: Mapped[int | None] = mapped_column(Integer)
     response_body: Mapped[str | None] = mapped_column(Text)
+
+
+class Visit(Base):
+    __tablename__ = "visits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    city: Mapped[str | None] = mapped_column(String(100))
+    is_vpn: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    page_url: Mapped[str | None] = mapped_column(Text)
+    referrer: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    utm_source: Mapped[str | None] = mapped_column(String(100))
+    utm_medium: Mapped[str | None] = mapped_column(String(100))
+    utm_campaign: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

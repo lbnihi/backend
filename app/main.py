@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import engine
 from app.errors import catch_unhandled, register_error_handlers
-from app.routers import contact, health, orders
+from app.routers import admin, clicks, contact, health, orders
 from app.services import background
 from app.services import maxmind
 
@@ -41,7 +41,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -50,3 +50,5 @@ register_error_handlers(app)
 app.include_router(health.router)
 app.include_router(orders.router)
 app.include_router(contact.router)
+app.include_router(clicks.router)
+app.include_router(admin.router)

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     snap_pixel_id: str = ""
     snap_access_token: str = ""
 
+    admin_username: str = ""
+    admin_password: str = ""
+    admin_jwt_secret: str = "change-me-in-production"
+
     whitelisted_phones: str = "0550000000"
 
     order_rate_limit_per_ip: int = 10

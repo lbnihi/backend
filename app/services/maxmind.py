@@ -195,6 +195,11 @@ def evaluate(response: geoip2.models.City) -> GeoResult:
     return GeoResult(True, "valid", country, city, asn_org, risk=risk)
 
 
+async def check_ip(ip_address: str) -> GeoResult:
+    """Lightweight IP check for click tracking — no phone needed, no logging."""
+    return await _validate(ip_address, "")
+
+
 def clear_cache() -> None:
     global _insights_disabled_until
     _cache.clear()
