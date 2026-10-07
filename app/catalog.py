@@ -25,7 +25,7 @@ PRODUCTS: dict[str, CatalogProduct] = {
     "hyaluronic-acid": CatalogProduct(
         slug="hyaluronic-acid",
         name="كبسولات حمض الهيالورونيك",
-        tagline="نضارتك من الداخل... بشرة مشرقة بدون فلتر",
+        tagline="ركب أخف وبشرة تشع... بكبسولتين في اليوم",
     ),
 }
 
