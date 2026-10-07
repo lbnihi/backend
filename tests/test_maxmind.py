@@ -30,6 +30,8 @@ class FakeClient:
             raise self.error
         return self.response
 
+    city = insights
+
 
 @pytest.fixture(autouse=True)
 def reset(monkeypatch):
@@ -120,3 +122,37 @@ async def test_not_configured_refuses(monkeypatch):
     use(monkeypatch, None)
     r = await maxmind.validate_ip("2.88.1.1", PHONE)
     assert (r.allowed, r.reason) == (False, "maxmind_not_configured")
+
+
+def geolite(country="SA", city="Riyadh", asn="Saudi Telecom Company JSC") -> geoip2.models.City:
+    raw = {
+        "country": {"iso_code": country},
+        "city": {"names": {"en": city}},
+        "traits": {"ip_address": "2.88.0.1", "autonomous_system_organization": asn},
+    }
+    return geoip2.models.City(["en"], **raw)
+
+
+class NoInsightsClient(FakeClient):
+    async def insights(self, ip):
+        self.calls += 1
+        raise geoip2.errors.PermissionRequiredError("You do not have permission to use this service interface.")
+
+
+@pytest.mark.parametrize(
+    "response,allowed,reason",
+    [
+        (geolite(), True, "valid"),
+        (geolite(country="FR", city="Paris", asn="Orange"), False, "country_FR"),
+        (geolite(asn="Datacamp Limited VPN"), False, "suspicious_asn"),
+    ],
+)
+async def test_geolite_fallback_without_insights(monkeypatch, response, allowed, reason):
+    insights_client = use(monkeypatch, NoInsightsClient())
+    monkeypatch.setattr(maxmind, "_geolite_client", FakeClient(response))
+    r = await maxmind.validate_ip("2.88.0.1", PHONE)
+    assert (r.allowed, r.reason) == (allowed, reason)
+    # Insights isn't retried on the next order (only after an hour)
+    maxmind._cache.clear()
+    await maxmind.validate_ip("2.88.0.2", PHONE)
+    assert insights_client.calls == 1

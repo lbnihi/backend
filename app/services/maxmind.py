@@ -1,8 +1,9 @@
-"""KSA-only geo restriction and VPN / proxy / risk detection via the MaxMind GeoIP2 Insights web service.
+"""KSA-only geo restriction and VPN / proxy / risk detection via MaxMind web services.
 
-Every non-whitelisted order is checked live against https://geoip.maxmind.com (Insights endpoint).
-Strict by default: if the API is not configured or unreachable the order is refused,
-unless MAXMIND_FAIL_OPEN=true.
+Every non-whitelisted order is checked live. GeoIP2 Insights (paid credits) gives VPN/proxy/hosting flags and a
+risk score. Accounts without Insights get PERMISSION_REQUIRED; we then fall back to the free GeoLite City web
+service (country + network owner, VPN detected by network name only) and retry Insights an hour later.
+Strict by default: if no verdict is possible the order is refused, unless MAXMIND_FAIL_OPEN=true.
 """
 
 import ipaddress
@@ -20,6 +21,10 @@ from app.utils.phone import mask_phone
 logger = logging.getLogger("fraud")
 
 _client: geoip2.webservice.AsyncClient | None = None
+_geolite_client: geoip2.webservice.AsyncClient | None = None
+# monotonic time until which Insights is skipped (account lacks permission)
+_insights_disabled_until = 0.0
+INSIGHTS_RETRY_SECONDS = 3600
 
 # Lookups cost credits: reuse a verdict for the same IP for an hour.
 CACHE_TTL_SECONDS = 3600
@@ -52,7 +57,7 @@ def is_configured() -> bool:
 
 
 def start_client() -> None:
-    global _client
+    global _client, _geolite_client
     if not is_configured():
         mode = "ALLOWED (fail-open)" if settings.maxmind_fail_open else "REFUSED"
         logger.warning("MaxMind credentials missing: non-whitelisted orders will be %s", mode)
@@ -62,17 +67,19 @@ def start_client() -> None:
     except ValueError:
         logger.error("MAXMIND_ACCOUNT_ID must be numeric")
         return
-    _client = geoip2.webservice.AsyncClient(
-        account_id, settings.maxmind_license_key.strip(), timeout=settings.maxmind_timeout_seconds
-    )
-    logger.info("MaxMind Insights web service client ready")
+    key = settings.maxmind_license_key.strip()
+    timeout = settings.maxmind_timeout_seconds
+    _client = geoip2.webservice.AsyncClient(account_id, key, timeout=timeout)
+    _geolite_client = geoip2.webservice.AsyncClient(account_id, key, host="geolite.info", timeout=timeout)
+    logger.info("MaxMind web service clients ready")
 
 
 async def close_client() -> None:
-    global _client
-    if _client is not None:
-        await _client.close()
-        _client = None
+    global _client, _geolite_client
+    for c in (_client, _geolite_client):
+        if c is not None:
+            await c.close()
+    _client = _geolite_client = None
 
 
 def is_ready() -> bool:
@@ -120,9 +127,21 @@ async def _validate(ip_address: str, phone: str) -> GeoResult:
     if _client is None:
         return _unavailable("maxmind_not_configured")
 
-    # 2. Live lookup
+    # 2. Live lookup: Insights, or GeoLite City when the account has no Insights access
+    global _insights_disabled_until
     try:
-        response = await _client.insights(ip_address)
+        if time.monotonic() >= _insights_disabled_until:
+            try:
+                response = await _client.insights(ip_address)
+            except geoip2.errors.PermissionRequiredError:
+                _insights_disabled_until = time.monotonic() + INSIGHTS_RETRY_SECONDS
+                logger.warning(
+                    "MaxMind account has no GeoIP2 Insights access — using free GeoLite City "
+                    "(country + network-name VPN check only). Buy Insights credits for full VPN/risk detection."
+                )
+                response = await _geolite_client.city(ip_address)
+        else:
+            response = await _geolite_client.city(ip_address)
     except geoip2.errors.AddressNotFoundError:
         return GeoResult(False, "ip_not_found")
     except (geoip2.errors.AuthenticationError, geoip2.errors.PermissionRequiredError) as exc:
@@ -142,12 +161,13 @@ async def _validate(ip_address: str, phone: str) -> GeoResult:
     return result
 
 
-def evaluate(response: geoip2.models.Insights) -> GeoResult:
+def evaluate(response: geoip2.models.City) -> GeoResult:
+    """Works for Insights (all checks) and GeoLite City (no anonymizer flags / risk: those stay False/None)."""
     country = response.country.iso_code or ""
     city = response.city.name or "Unknown"
     traits = response.traits
     asn_org = traits.autonomous_system_organization or traits.isp or ""
-    risk = traits.ip_risk_snapshot
+    risk = getattr(traits, "ip_risk_snapshot", None)
 
     # 3. Country must be SA
     if country != "SA":
@@ -176,4 +196,6 @@ def evaluate(response: geoip2.models.Insights) -> GeoResult:
 
 
 def clear_cache() -> None:
+    global _insights_disabled_until
     _cache.clear()
+    _insights_disabled_until = 0.0
