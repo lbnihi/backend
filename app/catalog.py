@@ -19,8 +19,8 @@ PRODUCTS: dict[str, CatalogProduct] = {
     ),
     "thyme-blackseed": CatalogProduct(
         slug="thyme-blackseed",
-        name="كبسولات الزعتر والحبة السوداء",
-        tagline="مناعتك هي درعك... قوّيها بقوة الطبيعة",
+        name="زيت الأوريجانو والحبة السوداء",
+        tagline="بطن مرتاح ومناعة أقوى... من كنوز الطبيعة",
     ),
     "hyaluronic-acid": CatalogProduct(
         slug="hyaluronic-acid",
