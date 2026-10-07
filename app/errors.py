@@ -59,6 +59,22 @@ def _error_body(code: str, message: str, message_en: str = "", details: list | N
     return body
 
 
+async def catch_unhandled(request: Request, call_next):
+    """Turn crashes into the standard 500 *inside* the CORS middleware.
+
+    Starlette's own 500 handler runs outside CORS, so the browser can't read it and the shopper sees
+    "check your internet" instead of a retry message.
+    """
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.exception("Unhandled error: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content=_error_body("server_error", "صار خطأ غير متوقع، حاولي مرة ثانية", "Internal server error"),
+        )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def handle_api_error(_: Request, exc: ApiError) -> JSONResponse:

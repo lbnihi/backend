@@ -280,3 +280,22 @@ async def test_cloudflare_ip_wins_over_spoofed_forwarded_for(stubs):
             headers={"X-Forwarded-For": SA_IP, "CF-Connecting-IP": "8.8.8.8"},
         )
     assert r.status_code == 403 and r.json()["code"] == "geo_blocked"
+
+
+async def test_unexpected_error_still_has_cors_headers(monkeypatch):
+    """Without CORS headers the browser can't read a 500 and shows 'check your internet'."""
+
+    async def boom(ip, phone):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(maxmind, "validate_ip", boom)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/api/orders",
+            json=order_body(phone="0552223333"),
+            headers={"X-Forwarded-For": SA_IP, "Origin": "https://qaalbalkhalij.store"},
+        )
+    assert r.status_code == 500
+    assert r.json()["code"] == "server_error"
+    assert r.headers.get("access-control-allow-origin") == "https://qaalbalkhalij.store"

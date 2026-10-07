@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
-from app.errors import register_error_handlers
+from app.errors import catch_unhandled, register_error_handlers
 from app.routers import contact, health, orders
 from app.services import background
 from app.services import maxmind
@@ -35,6 +35,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Qalb Alkhalij API", version="1.0.0", lifespan=lifespan)
 
+# Registered first so CORS (added next) wraps it: even crash responses carry CORS headers.
+app.middleware("http")(catch_unhandled)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
