@@ -299,3 +299,31 @@ async def test_unexpected_error_still_has_cors_headers(monkeypatch):
     assert r.status_code == 500
     assert r.json()["code"] == "server_error"
     assert r.headers.get("access-control-allow-origin") == "https://qaalbalkhalij.store"
+
+
+async def test_click_tracking_never_calls_maxmind(monkeypatch):
+    """Page views must not spend MaxMind lookups: order checks depend on that quota."""
+
+    class Boom:
+        async def insights(self, ip):
+            raise AssertionError("MaxMind called for a page view")
+
+        city = insights
+
+    monkeypatch.setattr(maxmind, "_client", Boom())
+    monkeypatch.setattr(maxmind, "_geolite_client", Boom())
+    maxmind.clear_cache()
+    async with client() as c:
+        r = await c.post(
+            "/api/clicks",
+            json={"page_url": "https://qaalbalkhalij.store/products/hyaluronic-acid", "utm_source": "snapchat"},
+            headers={"CF-Connecting-IP": "2.88.1.1", "CF-IPCountry": "SA"},
+        )
+    assert r.status_code == 204
+    from app.database import async_session
+    from app.models import Visit
+    from sqlalchemy import select
+
+    async with async_session() as s:
+        visit = (await s.scalars(select(Visit).order_by(Visit.id.desc()))).first()
+    assert visit.ip_address == "2.88.1.1" and visit.country_code == "SA" and visit.utm_source == "snapchat"

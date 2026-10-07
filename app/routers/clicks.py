@@ -16,26 +16,35 @@ async def record_click(request: Request) -> None:
     """Record a page visit. Fire-and-forget from the frontend — always returns 204."""
     ip = get_client_ip(request)
 
-    # Quick geo check — reuses MaxMind cache so almost free for repeat IPs
-    geo = await maxmind.check_ip(ip)
+    # No MaxMind call here: page views would use up the lookup quota that order checks depend on.
+    # Country comes free from Cloudflare (CF-IPCountry; "T1" = Tor); VPN is known only if this IP
+    # already went through an order check.
+    cached = maxmind.cached_result(ip)
+    cf_country = request.headers.get("CF-IPCountry", "").upper()
+    country = cached.country if cached and cached.country else (cf_country if len(cf_country) == 2 else "")
+    is_vpn = cached.is_vpn if cached else cf_country == "T1"
 
     try:
         body = await request.json()
     except Exception:
         body = {}
 
-    async with async_session() as session:
-        visit = Visit(
-            ip_address=ip,
-            country_code=geo.country[:2] if geo.country else None,
-            city=geo.city if geo.city != "Unknown" else None,
-            is_vpn=geo.is_vpn or (not geo.allowed and geo.reason != "whitelisted"),
-            page_url=str(body.get("page_url", ""))[:2048] or None,
-            referrer=str(body.get("referrer", ""))[:2048] or None,
-            user_agent=(request.headers.get("user-agent", ""))[:1024] or None,
-            utm_source=str(body.get("utm_source", ""))[:100] or None,
-            utm_medium=str(body.get("utm_medium", ""))[:100] or None,
-            utm_campaign=str(body.get("utm_campaign", ""))[:255] or None,
-        )
-        session.add(visit)
-        await session.commit()
+    try:
+        async with async_session() as session:
+            session.add(
+                Visit(
+                    ip_address=ip,
+                    country_code=country[:2] if country and country not in ("XX", "T1") else None,
+                    city=cached.city if cached and cached.city != "Unknown" else None,
+                    is_vpn=is_vpn,
+                    page_url=str(body.get("page_url", ""))[:2048] or None,
+                    referrer=str(body.get("referrer", ""))[:2048] or None,
+                    user_agent=(request.headers.get("user-agent", ""))[:1024] or None,
+                    utm_source=str(body.get("utm_source", ""))[:100] or None,
+                    utm_medium=str(body.get("utm_medium", ""))[:100] or None,
+                    utm_campaign=str(body.get("utm_campaign", ""))[:255] or None,
+                )
+            )
+            await session.commit()
+    except Exception as exc:  # tracking must never error for the shopper
+        logger.warning("Could not record visit: %s", exc)

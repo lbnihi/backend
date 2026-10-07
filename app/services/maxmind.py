@@ -195,9 +195,12 @@ def evaluate(response: geoip2.models.City) -> GeoResult:
     return GeoResult(True, "valid", country, city, asn_org, risk=risk)
 
 
-async def check_ip(ip_address: str) -> GeoResult:
-    """Lightweight IP check for click tracking — no phone needed, no logging."""
-    return await _validate(ip_address, "")
+def cached_result(ip_address: str) -> GeoResult | None:
+    """Verdict already in the cache (from an order check). Never calls MaxMind, so page views cost no credits."""
+    cached = _cache.get(ip_address)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    return None
 
 
 def clear_cache() -> None:
