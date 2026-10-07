@@ -23,6 +23,6 @@ RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fs http://localhost:8000/health || exit 1
+  CMD curl -fs "http://localhost:${PORT:-8000}/health" || exit 1
 
 CMD ["./start.sh"]

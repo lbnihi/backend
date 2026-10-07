@@ -19,7 +19,7 @@ echo "Starting server..."
 # One worker by default: the in-memory rate limiter is per process.
 exec uvicorn app.main:app \
   --host 0.0.0.0 \
-  --port 8000 \
+  --port "${PORT:-8000}" \
   --workers "${WEB_CONCURRENCY:-1}" \
   --proxy-headers \
   --forwarded-allow-ips="*"
