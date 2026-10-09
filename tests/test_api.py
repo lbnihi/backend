@@ -367,3 +367,29 @@ async def test_moringa_orders_and_oregano_never_upsold():
         r = await c.post("/api/orders", json=order_body(items=items, phone="0556667777"), headers={"X-Forwarded-For": SA_IP})
     assert r.status_code == 201, r.text
     assert r.json()["order"]["total"] == 199.0 and r.json()["order"]["items"][0]["product_name"] == "كبسولات المورينجا"
+
+
+async def test_thank_you_addon(stubs):
+    """Add one pack from the thank-you page: same order, buyer-only, no duplicates, sheet note."""
+    async with client() as c:
+        r = await c.post("/api/orders", json=order_body(phone="0551110000"), headers={"X-Forwarded-For": SA_IP})
+        order = r.json()["order"]
+        oid, number = order["id"], order["order_number"]
+        await c.post(f"/api/orders/{oid}/upsell", json={"accepted": False, "event_id": "evt_u"})
+
+        bad = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "moringa", "order_event_id": "guess"})
+        assert bad.status_code == 404  # someone else's order id
+
+        ok = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "moringa", "order_event_id": "evt_abc", "event_id": "evt_add"})
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["order"]["total"] == 349.0 + 149.0
+
+        dup = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "moringa", "order_event_id": "evt_abc"})
+        assert dup.status_code == 409
+        same = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "turmeric-golden", "order_event_id": "evt_abc"})
+        assert same.status_code == 409  # already in the original order
+
+        detail = (await c.get(f"/api/orders/{number}")).json()
+    assert [i["product_slug"] for i in detail["items"]] == ["turmeric-golden", "moringa"]
+    await settle()
+    assert any("أضافت بعد الطلب: كبسولات المورينجا" in (s.get("notes") or "") for s in stubs["sheets"])

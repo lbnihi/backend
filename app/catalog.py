@@ -43,6 +43,10 @@ OFFERS: dict[int, tuple[Decimal, str]] = {
 
 SINGLE_PRICE = OFFERS[1][0]
 UPSELL_PRICE = Decimal("99.00")
+# Thank-you page: one pack added to the same order (same delivery, same confirmation call).
+ADDON_PRICE = Decimal("149.00")
+ADDON_WINDOW_HOURS = 2
+MAX_ADDONS = 2
 
 # Post-checkout upsell target per product. Upsells and cross-sells only offer the capsule line
 # (turmeric, hyaluronic, moringa); oregano is still sold on its own page.

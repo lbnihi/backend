@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 import secrets
 import string
@@ -9,12 +10,21 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import errors
-from app.catalog import OFFERS, PRODUCTS, UPSELL_PRICE, pick_upsell, upsell_payload
+from app.catalog import (
+    ADDON_PRICE,
+    ADDON_WINDOW_HOURS,
+    MAX_ADDONS,
+    OFFERS,
+    PRODUCTS,
+    UPSELL_PRICE,
+    pick_upsell,
+    upsell_payload,
+)
 from app.config import settings
 from app.database import async_session, get_db
 from app.errors import ApiError
 from app.models import Order
-from app.schemas import CreateOrderRequest, UpsellRequest
+from app.schemas import AddonRequest, CreateOrderRequest, UpsellRequest
 from app.services import capi, maxmind, rate_limit, sheets
 from app.services.background import fire_and_forget
 from app.services.tracking_context import TrackedItem, TrackingContext
@@ -63,7 +73,14 @@ def sheet_data(order: Order) -> dict:
         "utm_medium": order.utm_medium or "",
         "utm_campaign": order.utm_campaign or "",
         "utm_content": order.utm_content or "",
+        "notes": addon_note(order),
     }
+
+
+def addon_note(order: Order) -> str:
+    """Tells the confirmation team which items were added from the thank-you page."""
+    added = [i["product_name"] for i in order.items if i.get("addon")]
+    return f"أضافت بعد الطلب: {'، '.join(added)}" if added else ""
 
 
 async def finalize_if_undecided(order_id: int) -> None:
@@ -204,6 +221,71 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
     }
 
 
+@router.post("/orders/{order_id}/addons")
+async def add_to_order(order_id: int, body: AddonRequest, request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Thank-you page: add one pack of another product to the same order (same delivery, same call)."""
+    order = await db.get(Order, order_id)
+    if order is None or not order.event_id or not secrets.compare_digest(order.event_id, body.order_event_id):
+        raise ApiError(404, "not_found", "الطلب غير موجود", "Order not found")
+    if body.product_slug not in PRODUCTS:
+        raise ApiError(422, "invalid_product", "المنتج غير متوفر", "Unknown product")
+    created = order.created_at if order.created_at.tzinfo else order.created_at.replace(tzinfo=timezone.utc)
+    if order.status != "pending" or datetime.now(timezone.utc) - created > timedelta(hours=ADDON_WINDOW_HOURS):
+        raise ApiError(409, "addon_closed", "انتهى وقت الإضافة على هذا الطلب", "Order can no longer be changed")
+    if any(i["product_slug"] == body.product_slug for i in order.items) or (
+        order.upsell_accepted and order.upsell_product_slug == body.product_slug
+    ):
+        raise ApiError(409, "already_in_order", "المنتج موجود في طلبك", "Product already in order")
+    if sum(1 for i in order.items if i.get("addon")) >= MAX_ADDONS:
+        raise ApiError(409, "addon_limit", "وصلتي للحد الأقصى للإضافات", "Add-on limit reached")
+
+    price = money(ADDON_PRICE)
+    order.items = [
+        *order.items,
+        {
+            "product_slug": body.product_slug,
+            "product_name": PRODUCTS[body.product_slug].name,
+            "quantity": 1,
+            "unit_price": price,
+            "total_price": price,
+            "offer_label": "إضافة على الطلب",
+            "addon": True,
+        },
+    ]
+    order.subtotal = order.subtotal + ADDON_PRICE
+    order.total = order.total + ADDON_PRICE
+    await db.commit()
+    await db.refresh(order)
+
+    fire_and_forget(
+        capi.fire_purchase(
+            TrackingContext(
+                order_id=order.id,
+                order_number=order.order_number,
+                event_id=body.event_id,
+                phone=order.phone,
+                customer_name=order.customer_name,
+                city=order.city if order.city not in (None, "Unknown", "Test") else "",
+                ip_address=order.ip_address or get_client_ip(request),
+                user_agent=body.user_agent or order.user_agent or "",
+                page_url=body.page_url or order.page_url or settings.site_url,
+                referrer="",
+                fbc=order.fbc or "",
+                fbp=order.fbp or "",
+                ttclid=order.ttclid or "",
+                ttp=order.ttp or "",
+                sclid=order.sclid or "",
+                items=[TrackedItem(body.product_slug, 1, price, price)],
+            )
+        )
+    )
+    # Sheet rows are upserted by order number. Before the upsell decision, that step sends the row.
+    if order.upsell_decided:
+        fire_and_forget(sheets.send_to_sheets(sheet_data(order)))
+
+    return {"success": True, "order": {"order_number": order.order_number, "total": money(order.total)}}
+
+
 @router.post("/orders/{order_id}/upsell")
 async def handle_upsell(order_id: int, body: UpsellRequest, request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     order = await db.get(Order, order_id)
@@ -275,6 +357,7 @@ async def get_order(order_number: str, db: AsyncSession = Depends(get_db)) -> di
         "customer_name": order.customer_name,
         "items": [
             {
+                "product_slug": i["product_slug"],
                 "product_name": i["product_name"],
                 "quantity": i["quantity"],
                 "total_price": i["total_price"],

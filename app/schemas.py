@@ -107,6 +107,15 @@ class UpsellRequest(BaseModel):
     user_agent: str = Field(default="", max_length=1024)
 
 
+class AddonRequest(BaseModel):
+    product_slug: str = Field(max_length=100)
+    # The original order's event_id: only the buyer's browser knows it, so it proves the order is theirs.
+    order_event_id: str = Field(min_length=1, max_length=100)
+    event_id: str = Field(default="", max_length=100)
+    page_url: str = Field(default="", max_length=2048)
+    user_agent: str = Field(default="", max_length=1024)
+
+
 ContactSubject = Literal["استفسار عن منتج", "استفسار عن طلب", "اقتراح", "أخرى"]
 
 
