@@ -36,9 +36,9 @@ PRODUCTS: dict[str, CatalogProduct] = {
 
 # quantity -> (price, label)
 OFFERS: dict[int, tuple[Decimal, str]] = {
-    1: (Decimal("199.00"), "أول النتائج — عبوة واحدة"),
-    2: (Decimal("279.00"), "نتيجة مستمرة — عبوتين"),
-    3: (Decimal("349.00"), "نتيجة تدوم — ٣ عبوات"),
+    1: (Decimal("199.00"), "عبوة واحدة"),
+    2: (Decimal("279.00"), "عبوتين — نتيجة تثبت"),
+    3: (Decimal("349.00"), "٣ عبوات — نتيجة كاملة"),
 }
 
 SINGLE_PRICE = OFFERS[1][0]
