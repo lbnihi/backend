@@ -25,7 +25,7 @@ from app.database import async_session, get_db
 from app.errors import ApiError
 from app.models import Order
 from app.schemas import AddonRequest, CreateOrderRequest, UpsellRequest
-from app.services import capi, maxmind, rate_limit, sheets
+from app.services import capi, codnetwork, maxmind, rate_limit, sheets
 from app.services.background import fire_and_forget
 from app.services.tracking_context import TrackedItem, TrackingContext
 from app.utils.network import get_client_ip
@@ -96,6 +96,7 @@ async def finalize_if_undecided(order_id: int) -> None:
         if order is not None:
             logger.info("Order %s finalized without an upsell decision", order.order_number)
             await sheets.send_to_sheets(sheet_data(order))
+            await codnetwork.send_order(order.id)
 
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
@@ -334,6 +335,7 @@ async def handle_upsell(order_id: int, body: UpsellRequest, request: Request, db
         )
 
     fire_and_forget(sheets.send_to_sheets(sheet_data(order)))
+    fire_and_forget(codnetwork.send_order(order.id))
 
     response: dict = {
         "order_number": order.order_number,

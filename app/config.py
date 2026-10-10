@@ -39,6 +39,16 @@ class Settings(BaseSettings):
 
     sheets_webhook_url: str = ""
 
+    # COD Network call center (seller API v2). Empty token = disabled.
+    codnetwork_api_token: str = ""
+    codnetwork_base_url: str = "https://api.cod.network"
+    # product slug -> COD Network SKU, e.g. "hyaluronic-acid:MP-OHVNOQLIBYO8,turmeric-golden:XXX"
+    codnetwork_skus: str = ""
+    codnetwork_country: str = "SA"
+    codnetwork_currency: str = "SAR"
+    # Send orders from WHITELISTED_PHONES too (only to test the connection).
+    codnetwork_send_test_orders: bool = False
+
     fb_pixel_id: str = ""
     fb_access_token: str = ""
 
@@ -64,6 +74,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def codnetwork_sku_map(self) -> dict[str, str]:
+        pairs = (p.split(":", 1) for p in self.codnetwork_skus.split(",") if ":" in p)
+        return {slug.strip(): sku.strip() for slug, sku in pairs if slug.strip() and sku.strip()}
 
     @property
     def whitelist(self) -> set[str]:

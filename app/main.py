@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import engine
 from app.errors import catch_unhandled, register_error_handlers
 from app.routers import admin, clicks, contact, health, orders
-from app.services import background
+from app.services import background, codnetwork
 from app.services import maxmind
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
@@ -20,6 +20,7 @@ logger = logging.getLogger("app")
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     maxmind.start_client()
+    background.fire_and_forget(codnetwork.log_order_contract())
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))

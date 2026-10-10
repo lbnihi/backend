@@ -20,6 +20,8 @@ class Order(Base):
     customer_name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending")
+    # Lead id at COD Network once the order was pushed to the call center ("duplicate" if it already existed).
+    codnetwork_order_id: Mapped[str | None] = mapped_column(String(64))
     ip_address: Mapped[str | None] = mapped_column(String(45))
     country_code: Mapped[str | None] = mapped_column(String(2))
     city: Mapped[str | None] = mapped_column(String(100))
