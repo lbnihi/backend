@@ -64,7 +64,7 @@ async def get_metrics(
         or 0
     )
 
-    # Orders → confirmed → delivered. Revenue and AOV count delivered orders only (cash actually collected).
+    # Orders → confirmed → delivered.
     total_orders = await db.scalar(select(func.count(Order.id)).where(in_range)) or 0
     confirmed = (
         await db.scalar(
@@ -89,8 +89,9 @@ async def get_metrics(
     def pct(part: float, whole: float) -> float:
         return round(part / whole * 100, 2) if whole else 0
 
-    total_revenue = delivered_revenue
-    aov = delivered_revenue / delivered if delivered else 0
+    # Revenue = every order placed on the store; AOV = revenue ÷ orders. Delivered revenue is shown alongside.
+    total_revenue = float(await db.scalar(select(func.coalesce(func.sum(Order.total), 0)).where(in_range)) or 0)
+    aov = total_revenue / total_orders if total_orders else 0
     conversion_rate = pct(total_orders, unique_visitors)
 
     # Orders by status
@@ -224,6 +225,7 @@ async def get_metrics(
         "revenue": round(total_revenue, 2),
         "aov": round(aov, 2),
         "booked_revenue": round(booked_revenue, 2),
+        "delivered_revenue": round(delivered_revenue, 2),
         "status_breakdown": status_breakdown,
         "upsell": {
             "offered": upsell_offered,

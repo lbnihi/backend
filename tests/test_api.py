@@ -428,6 +428,7 @@ async def test_admin_funnel_metrics(monkeypatch):
     assert m["orders"] - m0["orders"] == 3
     assert m["confirmed"] - m0["confirmed"] == 2  # delivered + confirmed
     assert m["delivered"] - m0["delivered"] == 1
-    assert m["revenue"] - m0["revenue"] == 448.0  # delivered order only (349 + upsell 99)
+    assert m["revenue"] - m0["revenue"] == 448.0 + 349.0 + 349.0  # every order placed
+    assert m["delivered_revenue"] - m0["delivered_revenue"] == 448.0  # delivered order only (349 + upsell 99)
     for key in ("confirmation_rate", "delivery_rate", "checkout_cvr", "conversion_rate", "aov", "booked_revenue"):
         assert key in m
