@@ -1,8 +1,8 @@
 """COD Network (seller API v2): push each finalized order as a lead for the confirmation call center.
 
 Docs: https://developer.cod.network/#seller-v2 — Bearer token, POST /v2/seller/orders.
-The exact create-order contract is published at GET /v2/seller/public/descriptor/orders; it is logged once
-at startup so the payload below can be checked against it. Failures are logged and retried, never raised.
+Marketplace (drop) SKUs are refused by /orders (40049) and sent to /leads instead.
+Failures are logged and retried, never raised.
 """
 
 import asyncio
@@ -156,15 +156,3 @@ async def send_order(order_id: int) -> None:
                 return
             logger.error("COD Network: %s attempt %d failed %s %s", order.order_number, attempt, response.status_code, body)
 
-
-async def log_order_contract() -> None:
-    """Startup: print COD Network's own create-order contract once, to check the payload fields."""
-    if not settings.codnetwork_api_token.strip():
-        return
-    url = f"{settings.codnetwork_base_url.rstrip('/')}/v2/seller/public/descriptor/orders"
-    try:
-        async with _http() as client:
-            response = await client.get(url, headers=_headers())
-        logger.info("COD Network descriptor/orders %s: %s", response.status_code, response.text[:6000])
-    except httpx.HTTPError as exc:
-        logger.warning("COD Network descriptor unavailable: %s", exc)
