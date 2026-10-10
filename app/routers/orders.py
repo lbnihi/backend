@@ -283,6 +283,7 @@ async def add_to_order(order_id: int, body: AddonRequest, request: Request, db: 
     # Sheet rows are upserted by order number. Before the upsell decision, that step sends the row.
     if order.upsell_decided:
         fire_and_forget(sheets.send_to_sheets(sheet_data(order)))
+        fire_and_forget(codnetwork.send_addon(order.id, body.product_slug))
 
     return {"success": True, "order": {"order_number": order.order_number, "total": money(order.total)}}
 

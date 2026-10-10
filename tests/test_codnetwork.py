@@ -101,3 +101,23 @@ async def test_drop_product_falls_back_to_lead(cod, monkeypatch):
         await c.post(f"/api/orders/{r.json()['order']['id']}/upsell", json={"accepted": False})
         await settle()
     assert calls == ["https://api.cod.network/v2/seller/orders", "https://api.cod.network/v2/seller/leads"]
+
+
+async def test_thank_you_addon_sent_after_order(cod, monkeypatch):
+    """Add-on after the order reached COD Network → sent once as its own lead, flagged as the same order."""
+    monkeypatch.setattr(codnetwork.settings, "codnetwork_skus", "hyaluronic-acid:MP-HA,moringa:MP-MO")
+    async with client() as c:
+        r = await c.post("/api/orders", json=order_body(items=ha_items(1), phone="0552224444"), headers={"X-Forwarded-For": SA_IP})
+        order = r.json()["order"]
+        await c.post(f"/api/orders/{order['id']}/upsell", json={"accepted": False})
+        await settle()
+        assert len(cod) == 1  # the order itself
+        add = await c.post(f"/api/orders/{order['id']}/addons", json={"product_slug": "moringa", "order_event_id": "evt_abc"})
+        assert add.status_code == 200, add.text
+        await settle()
+        await codnetwork.send_addon(order["id"], "moringa")  # never twice
+    assert len(cod) == 2
+    extra = cod[1]["json"]
+    assert extra["items"] == [{"sku": "MP-MO", "name": "كبسولات المورينجا", "quantity": 1, "price": 149.0}]
+    assert extra["total"] == 149.0 and extra["reference"] == f"{order['order_number']}-moringa"
+    assert order["order_number"] in extra["note"] and extra["phone"] == "0552224444"
