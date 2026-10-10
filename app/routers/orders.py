@@ -77,6 +77,37 @@ def sheet_data(order: Order) -> dict:
     }
 
 
+def purchase_context(order: Order) -> TrackingContext:
+    """One Purchase per order (same click, same customer): order items + accepted upsell, original event_id.
+    Thank-you add-ons are excluded — they never create a second Purchase."""
+    items = [
+        TrackedItem(i["product_slug"], i["quantity"], i["unit_price"], i["total_price"])
+        for i in order.items
+        if not i.get("addon")
+    ]
+    if order.upsell_accepted and order.upsell_product_slug:
+        upsell = money(order.upsell_amount)
+        items.append(TrackedItem(order.upsell_product_slug, 1, upsell, upsell))
+    return TrackingContext(
+        order_id=order.id,
+        order_number=order.order_number,
+        event_id=order.event_id or "",
+        phone=order.phone,
+        customer_name=order.customer_name,
+        city=order.city if order.city not in (None, "Unknown", "Test") else "",
+        ip_address=order.ip_address or "",
+        user_agent=order.user_agent or "",
+        page_url=order.page_url or settings.site_url,
+        referrer="",
+        fbc=order.fbc or "",
+        fbp=order.fbp or "",
+        ttclid=order.ttclid or "",
+        ttp=order.ttp or "",
+        sclid=order.sclid or "",
+        items=items,
+    )
+
+
 def addon_note(order: Order) -> str:
     """Tells the confirmation team which items were added from the thank-you page."""
     added = [i["product_name"] for i in order.items if i.get("addon")]
@@ -96,6 +127,7 @@ async def finalize_if_undecided(order_id: int) -> None:
         if order is not None:
             logger.info("Order %s finalized without an upsell decision", order.order_number)
             await sheets.send_to_sheets(sheet_data(order))
+            await capi.fire_purchase(purchase_context(order))
             await codnetwork.send_order(order.id)
 
 
@@ -122,7 +154,6 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
 
     # Prices come from the catalog, never from the client.
     items: list[dict] = []
-    tracked: list[TrackedItem] = []
     for item in body.items:
         price, label = OFFERS[item.quantity]
         unit = (price / item.quantity).quantize(Decimal("0.01"))
@@ -136,7 +167,6 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
                 "offer_label": label,
             }
         )
-        tracked.append(TrackedItem(item.product_slug, item.quantity, money(unit), money(price)))
     subtotal = sum((OFFERS[i.quantity][0] for i in body.items), Decimal("0"))
 
     cart_slugs = [i.product_slug for i in body.items]
@@ -177,31 +207,8 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
     if not whitelisted:
         rate_limit.record_order(ip_address, body.phone)
 
-    # Geo city is only meaningful for real lookups.
-    capi_city = geo.city if geo.reason == "valid" and geo.city != "Unknown" else ""
-    fire_and_forget(
-        capi.fire_purchase(
-            TrackingContext(
-                order_id=order.id,
-                order_number=order.order_number,
-                event_id=body.event_id,
-                phone=body.phone,
-                customer_name=body.customer_name,
-                city=capi_city,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                page_url=body.page_url or settings.site_url,
-                referrer=body.referrer,
-                fbc=body.fbc,
-                fbp=body.fbp,
-                ttclid=body.ttclid,
-                ttp=body.ttp,
-                sclid=body.sclid,
-                items=tracked,
-            )
-        )
-    )
-    # Sheets waits for the upsell decision (or this fallback).
+    # Purchase (CAPI), Sheets and COD Network all wait for the upsell decision (or the 60s fallback),
+    # so the ad platforms get one Purchase with the final value.
     fire_and_forget(finalize_if_undecided(order.id))
 
     return {
@@ -240,7 +247,7 @@ async def add_to_order(order_id: int, body: AddonRequest, request: Request, db: 
     if sum(1 for i in order.items if i.get("addon")) >= MAX_ADDONS:
         raise ApiError(409, "addon_limit", "وصلتي للحد الأقصى للإضافات", "Add-on limit reached")
 
-    price = money(ADDON_PRICE)
+    price = money(ADDON_PRICE)  # no Purchase event: same customer, same ad click
     order.items = [
         *order.items,
         {
@@ -258,28 +265,6 @@ async def add_to_order(order_id: int, body: AddonRequest, request: Request, db: 
     await db.commit()
     await db.refresh(order)
 
-    fire_and_forget(
-        capi.fire_purchase(
-            TrackingContext(
-                order_id=order.id,
-                order_number=order.order_number,
-                event_id=body.event_id,
-                phone=order.phone,
-                customer_name=order.customer_name,
-                city=order.city if order.city not in (None, "Unknown", "Test") else "",
-                ip_address=order.ip_address or get_client_ip(request),
-                user_agent=body.user_agent or order.user_agent or "",
-                page_url=body.page_url or order.page_url or settings.site_url,
-                referrer="",
-                fbc=order.fbc or "",
-                fbp=order.fbp or "",
-                ttclid=order.ttclid or "",
-                ttp=order.ttp or "",
-                sclid=order.sclid or "",
-                items=[TrackedItem(body.product_slug, 1, price, price)],
-            )
-        )
-    )
     # Sheet rows are upserted by order number. Before the upsell decision, that step sends the row.
     if order.upsell_decided:
         fire_and_forget(sheets.send_to_sheets(sheet_data(order)))
@@ -310,31 +295,7 @@ async def handle_upsell(order_id: int, body: UpsellRequest, request: Request, db
     await db.commit()
     await db.refresh(order)
 
-    if accepted and order.upsell_product_slug:
-        upsell_price = money(UPSELL_PRICE)
-        fire_and_forget(
-            capi.fire_purchase(
-                TrackingContext(
-                    order_id=order.id,
-                    order_number=order.order_number,
-                    event_id=body.event_id,
-                    phone=order.phone,
-                    customer_name=order.customer_name,
-                    city=order.city if order.city not in (None, "Unknown", "Test") else "",
-                    ip_address=order.ip_address or get_client_ip(request),
-                    user_agent=body.user_agent or order.user_agent or "",
-                    page_url=body.page_url or order.page_url or settings.site_url,
-                    referrer="",
-                    fbc=order.fbc or "",
-                    fbp=order.fbp or "",
-                    ttclid=order.ttclid or "",
-                    ttp=order.ttp or "",
-                    sclid=order.sclid or "",
-                    items=[TrackedItem(order.upsell_product_slug, 1, upsell_price, upsell_price)],
-                )
-            )
-        )
-
+    fire_and_forget(capi.fire_purchase(purchase_context(order)))
     fire_and_forget(sheets.send_to_sheets(sheet_data(order)))
     fire_and_forget(codnetwork.send_order(order.id))
 

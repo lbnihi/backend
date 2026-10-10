@@ -116,36 +116,8 @@ async def test_full_flow_with_upsell(stubs):
         }
         await settle()
 
-        # CAPI: three platforms, same event_id, correct hashing per platform
-        by_host = {httpx.URL(u).host: p for u, p, _ in stubs["capi"]}
-        fb = by_host["graph.facebook.com"]["data"][0]
-        assert fb["event_name"] == "Purchase" and fb["event_id"] == "evt_abc"
-        assert fb["user_data"]["ph"] == [sha("966551234567")]
-        assert fb["user_data"]["country"] == [sha("sa")]
-        assert fb["user_data"]["ct"] == [sha("riyadh")]
-        assert fb["user_data"]["client_ip_address"] == SA_IP
-        assert fb["user_data"]["fbc"] == "fb.1.1.abc"
-        assert fb["custom_data"]["contents"] == [{"id": "turmeric-golden", "quantity": 3, "item_price": 116.33}]
-        assert fb["custom_data"]["value"] == 349.0
-
-        tt_body = by_host["business-api.tiktok.com"]
-        assert tt_body["event_source"] == "web" and tt_body["event_source_id"] == "tiktok-pixel"
-        tt = tt_body["data"][0]
-        assert tt["event"] == "PlaceAnOrder" and tt["event_id"] == "evt_abc"
-        assert tt["user"]["phone"] == sha("+966551234567")
-        assert tt["user"]["ip"] == SA_IP and tt["user"]["ttclid"] == "TTC"
-        assert isinstance(tt["event_time"], int)
-        assert tt["properties"]["value"] == 349.0 and tt["properties"]["currency"] == "SAR"
-
-        sn = by_host["tr.snapchat.com"]["data"][0]
-        assert sn["event_type"] == "PURCHASE" and sn["uuid_c1"] == "evt_abc"
-        assert sn["hashed_phone_number"] == sha("+966551234567")
-        assert sn["hashed_ip_address"] == sha(SA_IP)
-        assert sn["price"] == "349.00" and sn["number_items"] == "3"
-        assert sn["transaction_id"] == order["order_number"] and sn["click_id"] == "SC"
-
+        assert stubs["capi"] == []  # no Purchase before the upsell decision: one Purchase per order
         assert stubs["sheets"] == []  # not before the upsell decision
-        stubs["capi"].clear()
 
         r = await c.post(
             f"/api/orders/{order['id']}/upsell",
@@ -164,10 +136,38 @@ async def test_full_flow_with_upsell(stubs):
         assert len(stubs["sheets"]) == 1  # decision sends once; fallback finalizer is a no-op
         row = stubs["sheets"][0]
         assert row["total"] == 448.0 and row["upsell_amount"] == 99.0 and row["utm_source"] == "snapchat"
-        assert {httpx.URL(u).host for u, _, _ in stubs["capi"]} == {
-            "graph.facebook.com", "business-api.tiktok.com", "tr.snapchat.com"
-        }
-        assert all("evt_up" in str(p) for _, p, _ in stubs["capi"])
+        assert len(stubs["capi"]) == 3  # one per platform, not one per item/decision
+        # CAPI: ONE Purchase per platform after the decision, original event_id, order + upsell value
+        by_host = {httpx.URL(u).host: p for u, p, _ in stubs["capi"]}
+        fb = by_host["graph.facebook.com"]["data"][0]
+        assert fb["event_name"] == "Purchase" and fb["event_id"] == "evt_abc"
+        assert fb["user_data"]["ph"] == [sha("966551234567")]
+        assert fb["user_data"]["country"] == [sha("sa")]
+        assert fb["user_data"]["ct"] == [sha("riyadh")]
+        assert fb["user_data"]["client_ip_address"] == SA_IP
+        assert fb["user_data"]["fbc"] == "fb.1.1.abc"
+        assert fb["custom_data"]["contents"] == [
+            {"id": "turmeric-golden", "quantity": 3, "item_price": 116.33},
+            {"id": "hyaluronic-acid", "quantity": 1, "item_price": 99.0},
+        ]
+        assert fb["custom_data"]["value"] == 448.0
+
+        tt_body = by_host["business-api.tiktok.com"]
+        assert tt_body["event_source"] == "web" and tt_body["event_source_id"] == "tiktok-pixel"
+        tt = tt_body["data"][0]
+        assert tt["event"] == "PlaceAnOrder" and tt["event_id"] == "evt_abc"
+        assert tt["user"]["phone"] == sha("+966551234567")
+        assert tt["user"]["ip"] == SA_IP and tt["user"]["ttclid"] == "TTC"
+        assert isinstance(tt["event_time"], int)
+        assert tt["properties"]["value"] == 448.0 and tt["properties"]["currency"] == "SAR"
+
+        sn = by_host["tr.snapchat.com"]["data"][0]
+        assert sn["event_type"] == "PURCHASE" and sn["uuid_c1"] == "evt_abc"
+        assert sn["hashed_phone_number"] == sha("+966551234567")
+        assert sn["hashed_ip_address"] == sha(SA_IP)
+        assert sn["price"] == "448.00" and sn["number_items"] == "4"
+        assert sn["transaction_id"] == order["order_number"] and sn["click_id"] == "SC"
+
 
         # second decision rejected
         r = await c.post(f"/api/orders/{order['id']}/upsell", json={"accepted": True, "product_slug": "hyaluronic-acid"})
@@ -184,6 +184,7 @@ async def test_abandoned_upsell_still_reaches_sheets(stubs):
         assert r.status_code == 201
     await asyncio.sleep(1.3)
     assert len(stubs["sheets"]) == 1 and stubs["sheets"][0]["total"] == 349.0
+    assert len(stubs["capi"]) == 3  # abandoned upsell: the fallback still sends the single Purchase
 
 
 async def test_upsell_skips_products_already_in_cart():
@@ -196,6 +197,7 @@ async def test_upsell_skips_products_already_in_cart():
     assert r.status_code == 201
     assert r.json()["upsell"]["product_slug"] == "moringa"
     assert r.json()["order"]["total"] == 398.0
+    await asyncio.sleep(1.3)  # let the fallback finalizer run here, not during the next test
 
 
 @pytest.mark.parametrize(
@@ -383,6 +385,8 @@ async def test_thank_you_addon(stubs):
         bad = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "moringa", "order_event_id": "guess"})
         assert bad.status_code == 404  # someone else's order id
 
+        await settle()
+        purchases_before = len(stubs["capi"])
         ok = await c.post(f"/api/orders/{oid}/addons", json={"product_slug": "moringa", "order_event_id": "evt_abc", "event_id": "evt_add"})
         assert ok.status_code == 200, ok.text
         assert ok.json()["order"]["total"] == 349.0 + 149.0
@@ -394,5 +398,6 @@ async def test_thank_you_addon(stubs):
 
         detail = (await c.get(f"/api/orders/{number}")).json()
     assert [i["product_slug"] for i in detail["items"]] == ["turmeric-golden", "moringa"]
+    assert len(stubs["capi"]) == purchases_before  # add-on: no second Purchase
     await settle()
     assert any("أضافت بعد الطلب: كبسولات المورينجا" in (s.get("notes") or "") for s in stubs["sheets"])
