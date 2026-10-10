@@ -128,11 +128,14 @@ async def test_full_flow_with_upsell(stubs):
         assert fb["custom_data"]["contents"] == [{"id": "turmeric-golden", "quantity": 3, "item_price": 116.33}]
         assert fb["custom_data"]["value"] == 349.0
 
-        tt = by_host["business-api.tiktok.com"]
+        tt_body = by_host["business-api.tiktok.com"]
+        assert tt_body["event_source"] == "web" and tt_body["event_source_id"] == "tiktok-pixel"
+        tt = tt_body["data"][0]
         assert tt["event"] == "PlaceAnOrder" and tt["event_id"] == "evt_abc"
-        assert tt["context"]["user"]["phone_number"] == sha("+966551234567")
-        assert tt["context"]["ip"] == SA_IP and tt["context"]["ad"] == {"callback": "TTC"}
-        assert tt["timestamp"].endswith("+03:00")
+        assert tt["user"]["phone"] == sha("+966551234567")
+        assert tt["user"]["ip"] == SA_IP and tt["user"]["ttclid"] == "TTC"
+        assert isinstance(tt["event_time"], int)
+        assert tt["properties"]["value"] == 349.0 and tt["properties"]["currency"] == "SAR"
 
         sn = by_host["tr.snapchat.com"]["data"][0]
         assert sn["event_type"] == "PURCHASE" and sn["uuid_c1"] == "evt_abc"
