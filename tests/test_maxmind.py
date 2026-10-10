@@ -52,24 +52,35 @@ async def test_saudi_residential_ip_is_allowed(monkeypatch):
     assert (r.allowed, r.reason, r.country, r.city) == (True, "valid", "SA", "Riyadh")
 
 
+async def test_outside_ksa_blocked(monkeypatch):
+    use(monkeypatch, FakeClient(insights(country="AE", city="Dubai")))
+    r = await maxmind.validate_ip("2.88.1.1", PHONE)
+    assert (r.allowed, r.reason) == (False, "country_AE")
+
+
 @pytest.mark.parametrize(
-    "response,reason",
+    "response",
     [
-        (insights(country="AE", city="Dubai"), "country_AE"),
-        (insights(is_anonymous_vpn=True, is_anonymous=True), "anonymous_ip"),
-        (insights(is_tor_exit_node=True), "anonymous_ip"),
-        (insights(is_residential_proxy=True), "anonymous_ip"),
-        (insights(is_public_proxy=True), "anonymous_ip"),
-        (insights(is_hosting_provider=True), "hosting_network"),
-        (insights(user_type="hosting"), "hosting_network"),
-        (insights(autonomous_system_organization="M247 Europe VPN"), "suspicious_asn"),
-        (insights(ip_risk_snapshot=45.0), "high_risk"),
+        insights(is_anonymous_vpn=True, is_anonymous=True),
+        insights(is_tor_exit_node=True),
+        insights(is_residential_proxy=True),
+        insights(is_public_proxy=True),
+        insights(is_hosting_provider=True),
+        insights(user_type="hosting"),
+        insights(autonomous_system_organization="M247 Europe VPN"),
     ],
 )
-async def test_blocked(monkeypatch, response, reason):
+async def test_vpn_in_ksa_allowed_but_flagged(monkeypatch, response):
+    """Saudi shoppers on a VPN can order: the IP only has to be in KSA. VPN is flagged for the admin."""
     use(monkeypatch, FakeClient(response))
     r = await maxmind.validate_ip("2.88.1.1", PHONE)
-    assert (r.allowed, r.reason) == (False, reason)
+    assert (r.allowed, r.reason, r.is_vpn) == (True, "valid", True)
+
+
+async def test_high_risk_score_allowed(monkeypatch):
+    use(monkeypatch, FakeClient(insights(ip_risk_snapshot=45.0)))
+    r = await maxmind.validate_ip("2.88.1.1", PHONE)
+    assert r.allowed
 
 
 async def test_whitelist_skips_lookup(monkeypatch):
@@ -144,7 +155,7 @@ class NoInsightsClient(FakeClient):
     [
         (geolite(), True, "valid"),
         (geolite(country="FR", city="Paris", asn="Orange"), False, "country_FR"),
-        (geolite(asn="Datacamp Limited VPN"), False, "suspicious_asn"),
+        (geolite(asn="Datacamp Limited VPN"), True, "valid"),
     ],
 )
 async def test_geolite_fallback_without_insights(monkeypatch, response, allowed, reason):

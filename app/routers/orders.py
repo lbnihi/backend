@@ -142,10 +142,6 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
 
     geo = await maxmind.validate_ip(ip_address, body.phone)
     if not geo.allowed:
-        if geo.reason in maxmind.VPN_REASONS:
-            raise ApiError(403, *errors.VPN_DETECTED)
-        if geo.reason == "high_risk":
-            raise ApiError(403, *errors.SUSPICIOUS_IP)
         if geo.reason == "ip_not_found":
             raise ApiError(403, *errors.IP_NOT_FOUND)
         if geo.reason.startswith("maxmind_"):

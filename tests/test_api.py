@@ -204,7 +204,6 @@ async def test_upsell_skips_products_already_in_cart():
     "ip,code,message",
     [
         ("8.8.8.8", "geo_blocked", "عذراً، الخدمة متاحة فقط داخل المملكة العربية السعودية"),
-        ("5.5.5.5", "vpn_detected", "عذراً، يرجى تعطيل VPN والمحاولة مرة أخرى"),
         ("9.9.9.9", "ip_not_found", "عذراً، لم نتمكن من التحقق من موقعك"),
     ],
 )

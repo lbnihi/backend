@@ -33,8 +33,6 @@ class Settings(BaseSettings):
     maxmind_license_key: str = ""
     # Refuse orders when MaxMind can't give a verdict (strict). true = let them through instead.
     maxmind_fail_open: bool = False
-    # Block IPs whose MaxMind ip_risk_snapshot (0.01-99) is at or above this.
-    maxmind_max_risk: float = 20
     maxmind_timeout_seconds: float = 5
 
     sheets_webhook_url: str = ""

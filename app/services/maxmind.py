@@ -1,4 +1,4 @@
-"""KSA-only geo restriction and VPN / proxy / risk detection via MaxMind web services.
+"""KSA-only geo restriction via MaxMind web services. VPN/proxy users are allowed (only flagged).
 
 Every non-whitelisted order is checked live. GeoIP2 Insights (paid credits) gives VPN/proxy/hosting flags and a
 risk score. Accounts without Insights get PERMISSION_REQUIRED; we then fall back to the free GeoLite City web
@@ -36,9 +36,6 @@ VPN_KEYWORDS = [
 ]
 # Insights user_type values that are never a real shopper's connection.
 BLOCKED_USER_TYPES = {"hosting", "search_engine_spider"}
-
-# Reasons the orders router maps to an error response.
-VPN_REASONS = {"anonymous_ip", "suspicious_asn", "hosting_network"}
 
 
 @dataclass
@@ -173,26 +170,19 @@ def evaluate(response: geoip2.models.City) -> GeoResult:
     if country != "SA":
         return GeoResult(False, f"country_{country or 'unknown'}", country, city, asn_org, risk=risk)
 
-    # 4. VPN / proxy / Tor / hosting detection
-    if (
+    # 4. VPN / proxy / hosting: NOT blocked (many Saudi shoppers browse with a VPN). Only flagged for the admin.
+    is_vpn = bool(
         traits.is_anonymous
         or traits.is_anonymous_vpn
         or traits.is_public_proxy
         or traits.is_residential_proxy
         or traits.is_tor_exit_node
         or traits.is_anonymous_proxy
-    ):
-        return GeoResult(False, "anonymous_ip", country, city, asn_org, is_vpn=True, risk=risk)
-    if traits.is_hosting_provider or (traits.user_type or "") in BLOCKED_USER_TYPES:
-        return GeoResult(False, "hosting_network", country, city, asn_org, is_vpn=True, risk=risk)
-    if any(kw in asn_org.lower() for kw in VPN_KEYWORDS):
-        return GeoResult(False, "suspicious_asn", country, city, asn_org, is_vpn=True, risk=risk)
-
-    # 5. MaxMind's own IP risk score (0.01 – 99)
-    if risk is not None and risk >= settings.maxmind_max_risk:
-        return GeoResult(False, "high_risk", country, city, asn_org, risk=risk)
-
-    return GeoResult(True, "valid", country, city, asn_org, risk=risk)
+        or traits.is_hosting_provider
+        or (traits.user_type or "") in BLOCKED_USER_TYPES
+        or any(kw in asn_org.lower() for kw in VPN_KEYWORDS)
+    )
+    return GeoResult(True, "valid", country, city, asn_org, is_vpn=is_vpn, risk=risk)
 
 
 def cached_result(ip_address: str) -> GeoResult | None:

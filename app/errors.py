@@ -19,13 +19,7 @@ class ApiError(Exception):
 
 
 GEO_BLOCKED = ("geo_blocked", "عذراً، الخدمة متاحة فقط داخل المملكة العربية السعودية", "Service only available in Saudi Arabia")
-VPN_DETECTED = ("vpn_detected", "عذراً، يرجى تعطيل VPN والمحاولة مرة أخرى", "Please disable your VPN and try again")
 IP_NOT_FOUND = ("ip_not_found", "عذراً، لم نتمكن من التحقق من موقعك", "Could not verify your location")
-SUSPICIOUS_IP = (
-    "suspicious_ip",
-    "عذراً، ما قدرنا نأكد طلبك من هالشبكة. جربي من بيانات الجوال أو شبكة واي فاي ثانية",
-    "Order refused: high-risk IP",
-)
 VERIFICATION_UNAVAILABLE = (
     "verification_unavailable",
     "عذراً، صار خطأ مؤقت. حاولي مرة ثانية بعد دقيقة",
