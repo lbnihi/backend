@@ -401,3 +401,34 @@ async def test_thank_you_addon(stubs):
     assert len(stubs["capi"]) == purchases_before  # add-on: no second Purchase
     await settle()
     assert any("أضافت بعد الطلب: كبسولات المورينجا" in (s.get("notes") or "") for s in stubs["sheets"])
+
+
+async def test_admin_funnel_metrics(monkeypatch):
+    """Clicks/page views/checkouts → orders → confirmed → delivered; revenue & AOV on delivered only."""
+    from app.services.auth import create_token
+
+    monkeypatch.setattr(maxmind.settings, "admin_jwt_secret", "y" * 40)
+    auth = {"Authorization": f"Bearer {create_token('admin')}"}
+    rate_limit.limiter.reset()
+    async with client() as c:
+        m0 = (await c.get("/api/admin/metrics", headers=auth)).json()
+        sa = {"CF-IPCountry": "SA"}
+        for ip, kind in [("2.88.9.1", None), ("2.88.9.1", None), ("2.88.9.2", None), ("2.88.9.2", "checkout"), ("2.88.9.3", "checkout")]:
+            await c.post("/api/clicks", json={"page_url": "https://x", **({"kind": kind} if kind else {})}, headers={**sa, "CF-Connecting-IP": ip})
+        ids = []
+        for phone in ("0554440001", "0554440002", "0554440003"):
+            r = await c.post("/api/orders", json=order_body(phone=phone), headers={"X-Forwarded-For": SA_IP})
+            ids.append(r.json()["order"]["id"])
+            await c.post(f"/api/orders/{ids[-1]}/upsell", json={"accepted": phone.endswith("1"), "product_slug": "hyaluronic-acid"})
+        for oid, status in zip(ids, ("delivered", "confirmed", "cancelled")):
+            assert (await c.patch(f"/api/admin/orders/{oid}/status", json={"status": status}, headers=auth)).status_code == 200
+        m = (await c.get("/api/admin/metrics", headers=auth)).json()
+    assert m["page_views"] - m0["page_views"] == 3
+    assert m["clicks"] - m0["clicks"] == 2  # unique visitors
+    assert m["checkouts"] - m0["checkouts"] == 2
+    assert m["orders"] - m0["orders"] == 3
+    assert m["confirmed"] - m0["confirmed"] == 2  # delivered + confirmed
+    assert m["delivered"] - m0["delivered"] == 1
+    assert m["revenue"] - m0["revenue"] == 448.0  # delivered order only (349 + upsell 99)
+    for key in ("confirmation_rate", "delivery_rate", "checkout_cvr", "conversion_rate", "aov", "booked_revenue"):
+        assert key in m

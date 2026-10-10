@@ -78,6 +78,8 @@ class Visit(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    # "page_view" for every page opened, "checkout" when the order form opens (checkout CVR).
+    kind: Mapped[str] = mapped_column(String(20), default="page_view", server_default="page_view")
     country_code: Mapped[str | None] = mapped_column(String(2))
     city: Mapped[str | None] = mapped_column(String(100))
     is_vpn: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

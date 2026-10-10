@@ -34,6 +34,7 @@ async def record_click(request: Request) -> None:
             session.add(
                 Visit(
                     ip_address=ip,
+                    kind="checkout" if body.get("kind") == "checkout" else "page_view",
                     country_code=country[:2] if country and country not in ("XX", "T1") else None,
                     city=cached.city if cached and cached.city != "Unknown" else None,
                     is_vpn=is_vpn,

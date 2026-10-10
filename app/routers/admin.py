@@ -44,36 +44,54 @@ async def get_metrics(
     start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
 
-    # Valid clicks (KSA, non-VPN)
-    valid_clicks = await db.scalar(
-        select(func.count(Visit.id)).where(
-            Visit.created_at.between(start_dt, end_dt),
-            Visit.is_vpn.is_(False),
-            Visit.country_code == "SA",
-        )
-    ) or 0
-
-    # Unique visitors (by IP, valid only)
-    unique_visitors = await db.scalar(
-        select(func.count(func.distinct(Visit.ip_address))).where(
-            Visit.created_at.between(start_dt, end_dt),
-            Visit.is_vpn.is_(False),
-            Visit.country_code == "SA",
-        )
-    ) or 0
-
-    # Orders
-    total_orders = await db.scalar(
-        select(func.count(Order.id)).where(Order.created_at.between(start_dt, end_dt))
-    ) or 0
-
-    revenue_result = await db.scalar(
-        select(func.coalesce(func.sum(Order.total), 0)).where(Order.created_at.between(start_dt, end_dt))
+    in_range = Order.created_at.between(start_dt, end_dt)
+    valid_visit = (
+        Visit.created_at.between(start_dt, end_dt),
+        Visit.is_vpn.is_(False),
+        Visit.country_code == "SA",
     )
-    total_revenue = float(revenue_result or 0)
 
-    aov = total_revenue / total_orders if total_orders > 0 else 0
-    conversion_rate = (total_orders / unique_visitors * 100) if unique_visitors > 0 else 0
+    # Traffic (KSA, non-VPN). Clicks = unique visitors; page views = every page opened.
+    page_views = await db.scalar(select(func.count(Visit.id)).where(*valid_visit, Visit.kind == "page_view")) or 0
+    unique_visitors = (
+        await db.scalar(
+            select(func.count(func.distinct(Visit.ip_address))).where(*valid_visit, Visit.kind == "page_view")
+        )
+        or 0
+    )
+    checkouts = (
+        await db.scalar(select(func.count(func.distinct(Visit.ip_address))).where(*valid_visit, Visit.kind == "checkout"))
+        or 0
+    )
+
+    # Orders → confirmed → delivered. Revenue and AOV count delivered orders only (cash actually collected).
+    total_orders = await db.scalar(select(func.count(Order.id)).where(in_range)) or 0
+    confirmed = (
+        await db.scalar(
+            select(func.count(Order.id)).where(in_range, Order.status.in_(("confirmed", "shipped", "delivered")))
+        )
+        or 0
+    )
+    delivered = await db.scalar(select(func.count(Order.id)).where(in_range, Order.status == "delivered")) or 0
+    delivered_revenue = float(
+        await db.scalar(
+            select(func.coalesce(func.sum(Order.total), 0)).where(in_range, Order.status == "delivered")
+        )
+        or 0
+    )
+    booked_revenue = float(
+        await db.scalar(
+            select(func.coalesce(func.sum(Order.total), 0)).where(in_range, Order.status != "cancelled")
+        )
+        or 0
+    )
+
+    def pct(part: float, whole: float) -> float:
+        return round(part / whole * 100, 2) if whole else 0
+
+    total_revenue = delivered_revenue
+    aov = delivered_revenue / delivered if delivered else 0
+    conversion_rate = pct(total_orders, unique_visitors)
 
     # Orders by status
     status_rows = await db.execute(
@@ -111,11 +129,7 @@ async def get_metrics(
             func.count(Visit.id),
             func.count(func.distinct(Visit.ip_address)),
         )
-        .where(
-            Visit.created_at.between(start_dt, end_dt),
-            Visit.is_vpn.is_(False),
-            Visit.country_code == "SA",
-        )
+        .where(*valid_visit, Visit.kind == "page_view")
         .group_by("day")
         .order_by("day")
     )
@@ -196,17 +210,25 @@ async def get_metrics(
 
     return {
         "period": {"start": str(start), "end": str(end)},
-        "clicks": valid_clicks,
+        "clicks": unique_visitors,
         "unique_visitors": unique_visitors,
+        "page_views": page_views,
+        "checkouts": checkouts,
+        "checkout_cvr": pct(total_orders, checkouts),
         "orders": total_orders,
+        "conversion_rate": conversion_rate,
+        "confirmed": confirmed,
+        "confirmation_rate": pct(confirmed, total_orders),
+        "delivered": delivered,
+        "delivery_rate": pct(delivered, confirmed),
         "revenue": round(total_revenue, 2),
         "aov": round(aov, 2),
-        "conversion_rate": round(conversion_rate, 2),
+        "booked_revenue": round(booked_revenue, 2),
         "status_breakdown": status_breakdown,
         "upsell": {
             "offered": upsell_offered,
             "accepted": upsell_accepted,
-            "rate": round(upsell_accepted / upsell_offered * 100, 1) if upsell_offered > 0 else 0,
+            "rate": pct(upsell_accepted, upsell_offered),
             "revenue": round(upsell_revenue, 2),
         },
         "daily": daily,
