@@ -45,13 +45,13 @@ async def get_metrics(
     end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
 
     in_range = Order.created_at.between(start_dt, end_dt)
+    # VPN users are counted: many Saudi shoppers browse with one. Visitors are unique IPs from KSA.
     valid_visit = (
         Visit.created_at.between(start_dt, end_dt),
-        Visit.is_vpn.is_(False),
         Visit.country_code == "SA",
     )
 
-    # Traffic (KSA, non-VPN). Clicks = unique visitors; page views = every page opened.
+    # Traffic (KSA). Clicks = unique visitors (by IP); page views = every page opened.
     page_views = await db.scalar(select(func.count(Visit.id)).where(*valid_visit, Visit.kind == "page_view")) or 0
     unique_visitors = (
         await db.scalar(
