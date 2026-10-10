@@ -19,6 +19,8 @@ from app.models import Order
 logger = logging.getLogger("codnetwork")
 
 DUPLICATE_LEAD = "20000"
+CITY_PLACEHOLDER = "يتم التأكيد بالاتصال"
+ADDRESS_PLACEHOLDER = "يتم تأكيد العنوان بالاتصال"
 RETRY_DELAYS = (0, 5, 30)
 
 
@@ -61,13 +63,17 @@ def build_payload(order: Order) -> dict | None:
         )
     if not items:
         return None
+    city = order.city if order.city not in (None, "", "Unknown", "Test") else CITY_PLACEHOLDER
     return {
         "reference": order.order_number,
         "full_name": order.customer_name,
         "phone": order.phone,
         "country": settings.codnetwork_country,
-        "city": order.city if order.city not in (None, "Unknown", "Test") else "",
-        "address": "",
+        # The site doesn't ask for an address: the call center confirms it on the call.
+        # COD Network requires city/area/address, so send the IP city when known and a clear placeholder.
+        "city": city,
+        "area": city,
+        "address": ADDRESS_PLACEHOLDER,
         "currency": settings.codnetwork_currency,
         "total": float(order.total),
         "items": items,

@@ -52,6 +52,7 @@ async def test_order_pushed_once_with_sku(cod):
     body = sent["json"]
     assert body["phone"] == "0552220000" and body["country"] == "SA" and body["currency"] == "SAR"
     assert body["items"] == [{"sku": "MP-OHVNOQLIBYO8", "name": "كبسولات حمض الهيالورونيك", "quantity": 3, "price": 349.0}]
+    assert body["city"] == "Riyadh" and body["area"] == "Riyadh" and body["address"]
     assert body["total"] == 349.0 and body["reference"] == r.json()["order"]["order_number"]
 
 
