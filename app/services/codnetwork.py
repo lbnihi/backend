@@ -19,6 +19,8 @@ from app.models import Order
 logger = logging.getLogger("codnetwork")
 
 DUPLICATE_LEAD = "20000"
+# /orders refuses marketplace (dropshipping) SKUs; those go to /leads and COD Network creates the order.
+DROP_PRODUCT = "40049"
 CITY_PLACEHOLDER = "يتم التأكيد بالاتصال"
 ADDRESS_PLACEHOLDER = "يتم تأكيد العنوان بالاتصال"
 RETRY_DELAYS = (0, 5, 30)
@@ -101,7 +103,8 @@ async def send_order(order_id: int) -> None:
             logger.warning("COD Network: %s has no product with a SKU in CODNETWORK_SKUS — not sent", order.order_number)
             return
 
-        url = f"{settings.codnetwork_base_url.rstrip('/')}/v2/seller/orders"
+        base = settings.codnetwork_base_url.rstrip("/")
+        url = f"{base}/v2/seller/orders"
         for attempt, delay in enumerate(RETRY_DELAYS, start=1):
             if delay:
                 await asyncio.sleep(delay)
@@ -123,6 +126,22 @@ async def send_order(order_id: int) -> None:
                 await session.commit()
                 logger.info("COD Network: %s sent, id=%s", order.order_number, remote_id)
                 return
+            if DROP_PRODUCT in body and url.endswith("/orders"):
+                logger.info("COD Network: %s is a drop product — sending as a lead", order.order_number)
+                url = f"{base}/v2/seller/leads"
+                async with _http() as client:
+                    response = await client.post(url, headers=_headers(), json=payload)
+                body = response.text[:1000]
+                if response.is_success:
+                    try:
+                        data = response.json().get("data") or {}
+                    except ValueError:
+                        data = {}
+                    remote_id = str((data.get("id") if isinstance(data, dict) else "") or "lead")
+                    order.codnetwork_order_id = f"lead:{remote_id}"[:64]
+                    await session.commit()
+                    logger.info("COD Network: %s sent as lead, id=%s", order.order_number, remote_id)
+                    return
             if DUPLICATE_LEAD in body:
                 order.codnetwork_order_id = "duplicate"
                 await session.commit()

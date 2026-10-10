@@ -73,3 +73,31 @@ async def test_test_orders_sent_when_enabled(cod, monkeypatch):
         await c.post(f"/api/orders/{r.json()['order']['id']}/upsell", json={"accepted": False})
         await settle()
     assert len(cod) == 1 and cod[0]["json"]["items"][0]["quantity"] == 1
+
+
+async def test_drop_product_falls_back_to_lead(cod, monkeypatch):
+    """/orders refuses marketplace SKUs (40049): the same payload is sent to /leads."""
+    calls: list[str] = []
+
+    class DropClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(url)
+            if url.endswith("/orders"):
+                return httpx.Response(400, json={"status": "error", "errors": [{"code": "40049", "message": "Cannot create order with drop product."}]})
+            return httpx.Response(201, json={"status": "success", "data": {"id": 55}})
+
+    monkeypatch.setattr(codnetwork, "_http", DropClient)
+    async with client() as c:
+        r = await c.post("/api/orders", json=order_body(items=ha_items(1), phone="0552223333"), headers={"X-Forwarded-For": SA_IP})
+        await c.post(f"/api/orders/{r.json()['order']['id']}/upsell", json={"accepted": False})
+        await settle()
+    assert calls == ["https://api.cod.network/v2/seller/orders", "https://api.cod.network/v2/seller/leads"]
