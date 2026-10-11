@@ -52,7 +52,7 @@ class Order(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
     page_url: Mapped[str | None] = mapped_column(Text)
 
-    event_id: Mapped[str | None] = mapped_column(String(100))
+    event_id: Mapped[str | None] = mapped_column(String(100), index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(

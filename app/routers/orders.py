@@ -131,10 +131,39 @@ async def finalize_if_undecided(order_id: int) -> None:
             await codnetwork.send_order(order.id)
 
 
+def order_response(order: Order) -> dict:
+    return {
+        "success": True,
+        "order": {
+            "id": order.id,
+            "order_number": order.order_number,
+            "customer_name": order.customer_name,
+            "phone": order.phone,
+            "items": order.items,
+            "subtotal": money(order.subtotal),
+            "total": money(order.total),
+            "status": order.status,
+            "city": order.city,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+        },
+        "upsell": upsell_payload(order.upsell_product_slug),
+    }
+
+
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
 async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     ip_address = get_client_ip(request)
     whitelisted = body.phone in settings.whitelist
+
+    # Retry of an order that already went through (reply lost on a slow/VPN connection): same event_id
+    # and phone → return that order instead of creating a duplicate.
+    if body.event_id:
+        existing = await db.scalar(
+            select(Order).where(Order.event_id == body.event_id, Order.phone == body.phone)
+        )
+        if existing is not None:
+            logger.info("Order %s: duplicate submit ignored (same event_id)", existing.order_number)
+            return order_response(existing)
 
     if not whitelisted and not rate_limit.check_order_limits(ip_address, body.phone):
         logger.info("rate_limited ip=%s phone=%s", ip_address, mask_phone(body.phone))
@@ -207,22 +236,7 @@ async def create_order(body: CreateOrderRequest, request: Request, db: AsyncSess
     # so the ad platforms get one Purchase with the final value.
     fire_and_forget(finalize_if_undecided(order.id))
 
-    return {
-        "success": True,
-        "order": {
-            "id": order.id,
-            "order_number": order.order_number,
-            "customer_name": order.customer_name,
-            "phone": order.phone,
-            "items": order.items,
-            "subtotal": money(order.subtotal),
-            "total": money(order.total),
-            "status": order.status,
-            "city": order.city,
-            "created_at": order.created_at.isoformat() if order.created_at else None,
-        },
-        "upsell": upsell_payload(upsell_slug),
-    }
+    return order_response(order)
 
 
 @router.post("/orders/{order_id}/addons")

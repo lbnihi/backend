@@ -107,7 +107,7 @@ async def test_thank_you_addon_sent_after_order(cod, monkeypatch):
     """Add-on after the order reached COD Network → sent once as its own lead, flagged as the same order."""
     monkeypatch.setattr(codnetwork.settings, "codnetwork_skus", "hyaluronic-acid:MP-HA,moringa:MP-MO")
     async with client() as c:
-        r = await c.post("/api/orders", json=order_body(items=ha_items(1), phone="0552224444"), headers={"X-Forwarded-For": SA_IP})
+        r = await c.post("/api/orders", json=order_body(items=ha_items(1), phone="0552224444", event_id="evt_abc"), headers={"X-Forwarded-For": SA_IP})
         order = r.json()["order"]
         await c.post(f"/api/orders/{order['id']}/upsell", json={"accepted": False})
         await settle()

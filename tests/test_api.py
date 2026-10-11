@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import hashlib
 
 import httpx
@@ -72,7 +73,8 @@ def order_body(**overrides) -> dict:
         ],
         "subtotal": 1,
         "total": 1,
-        "event_id": "evt_abc",
+        # Unique per order: the API treats a repeated event_id + phone as a retry of the same order.
+        "event_id": f"evt_{uuid.uuid4().hex[:12]}",
         "page_url": "https://qaalbalkhalij.store/products/turmeric-golden",
         "user_agent": "UA",
         "utm_source": "snapchat",
@@ -100,7 +102,7 @@ async def test_health():
 
 async def test_full_flow_with_upsell(stubs):
     async with client() as c:
-        r = await c.post("/api/orders", json=order_body(), headers={"X-Forwarded-For": f"{SA_IP}, 10.0.0.1"})
+        r = await c.post("/api/orders", json=order_body(event_id="evt_abc"), headers={"X-Forwarded-For": f"{SA_IP}, 10.0.0.1"})
         assert r.status_code == 201, r.text
         data = r.json()
         order = data["order"]
@@ -376,7 +378,7 @@ async def test_moringa_orders_and_oregano_never_upsold():
 async def test_thank_you_addon(stubs):
     """Add one pack from the thank-you page: same order, buyer-only, no duplicates, sheet note."""
     async with client() as c:
-        r = await c.post("/api/orders", json=order_body(phone="0551110000"), headers={"X-Forwarded-For": SA_IP})
+        r = await c.post("/api/orders", json=order_body(phone="0551110000", event_id="evt_abc"), headers={"X-Forwarded-For": SA_IP})
         order = r.json()["order"]
         oid, number = order["id"], order["order_number"]
         await c.post(f"/api/orders/{oid}/upsell", json={"accepted": False, "event_id": "evt_u"})
@@ -432,3 +434,17 @@ async def test_admin_funnel_metrics(monkeypatch):
     assert m["delivered_revenue"] - m0["delivered_revenue"] == 448.0  # delivered order only (349 + upsell 99)
     for key in ("confirmation_rate", "delivery_rate", "checkout_cvr", "conversion_rate", "aov", "booked_revenue"):
         assert key in m
+
+
+async def test_duplicate_submit_returns_same_order(stubs):
+    """A retry after a lost reply (slow/VPN connection) must not create a second order."""
+    body = order_body(event_id="evt_retry_1", phone="0551234567")
+    async with client() as c:
+        first = await c.post("/api/orders", json=body, headers={"X-Forwarded-For": SA_IP})
+        second = await c.post("/api/orders", json=body, headers={"X-Forwarded-For": SA_IP})
+        other = await c.post(
+            "/api/orders", json=order_body(event_id="evt_retry_2", phone="0551234567"), headers={"X-Forwarded-For": SA_IP}
+        )
+    assert first.status_code == second.status_code == 201
+    assert second.json()["order"]["order_number"] == first.json()["order"]["order_number"]
+    assert other.json()["order"]["order_number"] != first.json()["order"]["order_number"]
