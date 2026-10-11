@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     maxmind_license_key: str = ""
     # Refuse orders when MaxMind can't give a verdict (strict). true = let them through instead.
     maxmind_fail_open: bool = False
+    # Shared with the frontend's same-origin /api relay (orders keep working when a VPN blocks the api. subdomain).
+    # When set, a request carrying this secret may state the shopper's IP in X-Client-IP.
+    proxy_secret: str = ""
     maxmind_timeout_seconds: float = 5
 
     sheets_webhook_url: str = ""

@@ -25,6 +25,7 @@ VERIFICATION_UNAVAILABLE = (
     "عذراً، صار خطأ مؤقت. حاولي مرة ثانية بعد دقيقة",
     "Location verification temporarily unavailable",
 )
+PROXY_UNTRUSTED = ("proxy_untrusted", "صار خطأ مؤقت، حاولي مرة ثانية", "Relay secret missing or wrong")
 RATE_LIMITED = ("rate_limited", "عدد محاولات كثيرة، يرجى المحاولة لاحقاً", "Too many attempts, please try later")
 
 FIELD_MESSAGES = {

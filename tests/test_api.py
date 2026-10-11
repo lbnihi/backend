@@ -448,3 +448,25 @@ async def test_duplicate_submit_returns_same_order(stubs):
     assert first.status_code == second.status_code == 201
     assert second.json()["order"]["order_number"] == first.json()["order"]["order_number"]
     assert other.json()["order"]["order_number"] != first.json()["order"]["order_number"]
+
+
+async def test_relay_ip_trusted_only_with_secret(stubs, monkeypatch):
+    """The shop's /api relay states the shopper's IP; only honoured with the shared secret."""
+    from app.config import settings
+
+    relay = {"X-Forwarded-For": "8.8.8.8", "X-Client-IP": SA_IP}  # relay server abroad, shopper in KSA
+    async with client() as c:
+        monkeypatch.setattr(settings, "proxy_secret", "")
+        r = await c.post("/api/orders", json=order_body(phone="0551212121"), headers={**relay, "X-Proxy-Secret": "s3cret"})
+        assert r.status_code == 503 and r.json()["code"] == "proxy_untrusted"
+
+        monkeypatch.setattr(settings, "proxy_secret", "s3cret")
+        r = await c.post("/api/orders", json=order_body(phone="0551212121"), headers={**relay, "X-Proxy-Secret": "wrong"})
+        assert r.status_code == 503 and r.json()["code"] == "proxy_untrusted"
+
+        r = await c.post("/api/orders", json=order_body(phone="0551212121"), headers={**relay, "X-Proxy-Secret": "s3cret"})
+        assert r.status_code == 201
+
+        # Without the relay header, X-Client-IP is ignored: the 8.8.8.8 connection is checked (blocked).
+        r = await c.post("/api/orders", json=order_body(phone="0551313131"), headers=relay)
+        assert r.status_code == 403
